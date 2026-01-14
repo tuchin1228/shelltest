@@ -1,0 +1,206 @@
+
+CODEQL_DIR
+C:\codeql
+
+CODEQL_EXE
+C:\codeql\codeql.exe
+
+CSPROJ_NAME
+codescantest.csproj
+
+======================
+驗證
+======================
+$ErrorActionPreference = "Stop"
+    
+# 檢查 CodeQL 是否存在
+if (-not (Test-Path "$(CODEQL_EXE)")) {
+  throw "找不到 CodeQL CLI: $(CODEQL_EXE)"
+}
+
+# 將 CodeQL 加入 PATH
+$env:PATH = "$(CODEQL_DIR);$env:PATH"
+
+Write-Host "=== CodeQL CLI 資訊 ==="
+& codeql version
+
+
+======================
+用 vswhere 找到 MSBuild
+======================
+$ErrorActionPreference = "Stop"
+    
+# 使用 vswhere 尋找 Visual Studio 安裝路徑
+$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+if (-not (Test-Path $vswhere)) {
+  throw "找不到 vswhere.exe"
+}
+
+$vsPath = & $vswhere -latest -products * `
+  -requires Microsoft.Component.MSBuild `
+  -property installationPath
+
+if (-not $vsPath) {
+  throw "找不到包含 MSBuild 的 Visual Studio"
+}
+
+# 嘗試常見的 MSBuild 路徑
+$possiblePaths = @(
+  "$vsPath\MSBuild\Current\Bin\MSBuild.exe",
+  "$vsPath\MSBuild\15.0\Bin\MSBuild.exe"
+)
+
+$msbuild = $possiblePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if (-not $msbuild) {
+  throw "找不到 MSBuild.exe"
+}
+
+Write-Host "=== MSBuild 資訊 ==="
+Write-Host "路徑: $msbuild"
+& $msbuild -version
+
+# 儲存變數供後續步驟使用
+Write-Host "##vso[task.setvariable variable=MSBUILD_PATH]$msbuild"
+
+================================
+建立 CodeQL 資料庫
+================================
+$ErrorActionPreference = "Stop"
+$env:PATH = "$(CODEQL_DIR);$env:PATH"
+
+# 設定路徑
+$sourceRoot = "$(Build.SourcesDirectory)"
+$dbPath = Join-Path "$(Agent.TempDirectory)" "codeql-db"
+$msbuild = "$(MSBUILD_PATH)"
+
+# 清理舊的資料庫
+if (Test-Path $dbPath) {
+  Remove-Item $dbPath -Recurse -Force
+}
+
+# 尋找建置目標 (.sln 或 .csproj)
+$sln = Get-ChildItem $sourceRoot -Filter *.sln -Recurse | Select-Object -First 1
+$target = if ($sln) {
+  Write-Host "使用方案檔: $($sln.FullName)"
+  $sln.FullName
+} else {
+  $csproj = Get-ChildItem $sourceRoot -Filter *.csproj -Recurse | Select-Object -First 1
+  if (-not $csproj) {
+    throw "找不到 .sln 或 .csproj 檔案"
+  }
+  Write-Host "使用專案檔: $($csproj.FullName)"
+  $csproj.FullName
+}
+
+# 建立建置腳本 (處理空白路徑問題)
+$buildScript = Join-Path "$(Agent.TempDirectory)" "build.cmd"
+@"
+@echo off
+"$msbuild" "$target" /t:Rebuild /p:Configuration=Release /p:Platform="Any CPU"
+if %errorlevel% neq 0 (
+"$msbuild" "$target" /t:Rebuild /p:Configuration=Release
+)
+"@ | Set-Content -Path $buildScript -Encoding ASCII
+
+Write-Host "=== 建立 CodeQL 資料庫 ==="
+Write-Host "來源目錄: $sourceRoot"
+Write-Host "資料庫路徑: $dbPath"
+Write-Host "建置目標: $target"
+
+# 建立 CodeQL 資料庫
+& codeql database create $dbPath `
+  --language=csharp `
+  --source-root=$sourceRoot `
+  --command=$buildScript `
+  --overwrite
+
+if ($LASTEXITCODE -ne 0) {
+  throw "CodeQL 資料庫建立失敗"
+}
+
+Write-Host "✅ CodeQL 資料庫建立成功"
+Write-Host "##vso[task.setvariable variable=CODEQL_DB_PATH]$dbPath"
+
+
+==================================
+執行 CodeQL 分析
+==================================
+$ErrorActionPreference = "Stop"
+$env:PATH = "$(CODEQL_DIR);$env:PATH"
+
+$dbPath = "$(CODEQL_DB_PATH)"
+$outputPath = "$(Build.ArtifactStagingDirectory)\results.sarif"
+
+# 確保輸出目錄存在
+$outputDir = Split-Path $outputPath
+if (-not (Test-Path $outputDir)) {
+  New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+}
+
+# 設定 CodeQL 暫存目錄 (避免權限問題)
+$env:CODEQL_TMP_DIR = "$(Agent.TempDirectory)\codeql-tmp"
+New-Item -ItemType Directory -Force -Path $env:CODEQL_TMP_DIR | Out-Null
+
+Write-Host "=== 執行 CodeQL 分析 ==="
+Write-Host "資料庫: $dbPath"
+Write-Host "輸出: $outputPath"
+
+# 下載查詢套件
+Write-Host "`n📦 下載 C# 查詢套件..."
+& codeql pack download codeql/csharp-queries
+
+# 執行分析
+Write-Host "`n🔍 執行安全性與品質分析..."
+& codeql database analyze $dbPath `
+  codeql/csharp-queries:codeql-suites/csharp-security-and-quality.qls `
+  --format=sarif-latest `
+  --output=$outputPath `
+  --threads=0
+
+if ($LASTEXITCODE -ne 0) {
+  throw "CodeQL 分析失敗"
+}
+
+# 顯示分析結果摘要
+if (Test-Path $outputPath) {
+  try {
+    $sarif = Get-Content $outputPath -Raw | ConvertFrom-Json
+    $resultCount = 0
+    if ($sarif.runs -and $sarif.runs[0].results) {
+      $resultCount = $sarif.runs[0].results.Count
+    }
+    
+    Write-Host "`n=== 分析結果 ==="
+    Write-Host "發現問題數量: $resultCount"
+    Write-Host "SARIF 檔案: $outputPath"
+    
+    # 顯示前 10 個問題的摘要
+    if ($resultCount -gt 0) {
+      Write-Host "`n📋 問題摘要 (前 10 項):"
+      $sarif.runs[0].results | Select-Object -First 10 | ForEach-Object {
+        $ruleId = $_.ruleId
+        $message = $_.message.text
+        $location = ""
+        if ($_.locations -and $_.locations[0].physicalLocation) {
+          $uri = $_.locations[0].physicalLocation.artifactLocation.uri
+          $line = $_.locations[0].physicalLocation.region.startLine
+          $location = " [$uri`:$line]"
+        }
+        Write-Host "  • [$ruleId] $message$location"
+      }
+    }
+    
+    Write-Host "`n✅ CodeQL 分析完成"
+  } catch {
+    Write-Warning "無法解析 SARIF 檔案,但分析已完成"
+  }
+} else {
+  throw "找不到 SARIF 輸出檔案"
+}
+
+
+================================
+發佈組建成品
+================================
+CodeAnalysisLogs
