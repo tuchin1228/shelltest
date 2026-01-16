@@ -1,0 +1,1 @@
+.\config.cmd --deploymentgroup --deploymentgroupname "[DevOps Portal 建立的 Deployment groups Name]" --agent $env:COMPUTERNAME --runasservice --work '_work' --url '[devopsserverUrl]' --collectionname '[collectionname]' --projectname '[ProjectName]'
