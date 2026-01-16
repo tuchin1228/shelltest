@@ -1,0 +1,44 @@
+# 定義資料夾路徑
+$sourceFolder = "C:\A"
+$destFolder = "C:\B"
+$backupFolder = "C:\Backup"
+
+# 建立備份資料夾（如果不存在）
+if (-not (Test-Path $backupFolder)) {
+    New-Item -ItemType Directory -Path $backupFolder -Force
+}
+
+# 取得來源資料夾中的所有檔案
+$sourceFiles = Get-ChildItem -Path $sourceFolder -Recurse -File
+
+foreach ($file in $sourceFiles) {
+    # 計算目標檔案的相對路徑
+    $relativePath = $file.FullName.Substring($sourceFolder.Length)
+    $destFilePath = Join-Path $destFolder $relativePath
+    $backupFilePath = Join-Path $backupFolder $relativePath
+    
+    # 如果目標檔案已存在，先備份
+    if (Test-Path $destFilePath) {
+        # 建立備份資料夾結構
+        $backupFileDir = Split-Path $backupFilePath -Parent
+        if (-not (Test-Path $backupFileDir)) {
+            New-Item -ItemType Directory -Path $backupFileDir -Force
+        }
+        
+        # 複製到備份資料夾
+        Copy-Item -Path $destFilePath -Destination $backupFilePath -Force
+        Write-Host "已備份: $destFilePath -> $backupFilePath" -ForegroundColor Yellow
+    }
+    
+    # 建立目標資料夾結構
+    $destFileDir = Split-Path $destFilePath -Parent
+    if (-not (Test-Path $destFileDir)) {
+        New-Item -ItemType Directory -Path $destFileDir -Force
+    }
+    
+    # 移動檔案（剪下）
+    Move-Item -Path $file.FullName -Destination $destFilePath -Force
+    Write-Host "已移動: $($file.FullName) -> $destFilePath" -ForegroundColor Green
+}
+
+Write-Host "`n操作完成！" -ForegroundColor Cyan
