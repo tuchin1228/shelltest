@@ -1,0 +1,53 @@
+# 參數設定
+$buildArtifactPath = "$(System.DefaultWorkingDirectory)/_YourBuildName/drop"  # Build 成品路徑
+$targetFolder = "D:\WebSite\Production"  # B 資料夾路徑
+$backupRootFolder = "D:\Backup"  # 備份根目錄
+$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+$backupFolder = Join-Path $backupRootFolder $timestamp
+
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "開始部署流程" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "來源路徑: $buildArtifactPath"
+Write-Host "目標路徑: $targetFolder"
+Write-Host "備份路徑: $backupFolder"
+Write-Host ""
+
+# 步驟 1: 檢查目標資料夾是否存在
+if (-not (Test-Path $targetFolder)) {
+    Write-Host "目標資料夾不存在，將建立新資料夾" -ForegroundColor Yellow
+    New-Item -ItemType Directory -Path $targetFolder -Force
+} else {
+    # 步驟 2: 備份現有檔案
+    Write-Host "正在備份現有檔案..." -ForegroundColor Yellow
+    
+    if (-not (Test-Path $backupFolder)) {
+        New-Item -ItemType Directory -Path $backupFolder -Force
+    }
+    
+    # 複製整個目標資料夾到備份位置
+    Copy-Item -Path "$targetFolder\*" -Destination $backupFolder -Recurse -Force
+    Write-Host "備份完成: $backupFolder" -ForegroundColor Green
+}
+
+# 步驟 3: 部署新檔案（覆蓋）
+Write-Host ""
+Write-Host "正在部署新版本..." -ForegroundColor Yellow
+Copy-Item -Path "$buildArtifactPath\*" -Destination $targetFolder -Recurse -Force
+Write-Host "部署完成！" -ForegroundColor Green
+
+# 步驟 4: 清理舊備份（可選，保留最近 5 次備份）
+Write-Host ""
+Write-Host "清理舊備份..." -ForegroundColor Yellow
+$backups = Get-ChildItem -Path $backupRootFolder -Directory | Sort-Object Name -Descending
+if ($backups.Count -gt 5) {
+    $backups | Select-Object -Skip 5 | ForEach-Object {
+        Remove-Item $_.FullName -Recurse -Force
+        Write-Host "已刪除舊備份: $($_.Name)" -ForegroundColor Gray
+    }
+}
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "部署流程完成！" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
