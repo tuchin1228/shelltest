@@ -3,19 +3,15 @@ $sourceFolder = "C:\A"
 $destFolder = "C:\B"
 $backupBaseFolder = "C:\Backup"
 
-# 建立備份資料夾名稱（日期 + 流水號）
+# 建立今天日期的備份資料夾
 $today = Get-Date -Format "yyyyMMdd"
-$counter = 1
 $backupFolder = Join-Path $backupBaseFolder $today
 
-# 如果今天已經有備份，則加上流水號
-while (Test-Path $backupFolder) {
-    $counter++
-    $backupFolder = Join-Path $backupBaseFolder "$today-$counter"
+# 建立備份資料夾（如果不存在）
+if (-not (Test-Path $backupFolder)) {
+    New-Item -ItemType Directory -Path $backupFolder -Force | Out-Null
 }
 
-# 建立備份資料夾
-New-Item -ItemType Directory -Path $backupFolder -Force | Out-Null
 Write-Host "備份資料夾: $backupFolder" -ForegroundColor Cyan
 
 # 取得來源資料夾中的所有檔案
@@ -32,7 +28,7 @@ foreach ($file in $sourceFiles) {
     $destFilePath = Join-Path $destFolder $relativePath
     $backupFilePath = Join-Path $backupFolder $relativePath
     
-    # 如果目標檔案已存在，先備份
+    # 如果目標檔案已存在，需要備份
     if (Test-Path $destFilePath) {
         # 建立備份資料夾結構
         $backupFileDir = Split-Path $backupFilePath -Parent
@@ -40,10 +36,26 @@ foreach ($file in $sourceFiles) {
             New-Item -ItemType Directory -Path $backupFileDir -Force | Out-Null
         }
         
+        # 檢查備份檔案是否已存在，如果存在則加上流水號
+        $finalBackupPath = $backupFilePath
+        if (Test-Path $backupFilePath) {
+            $fileInfo = Get-Item $backupFilePath
+            $directory = $fileInfo.DirectoryName
+            $baseName = $fileInfo.BaseName
+            $extension = $fileInfo.Extension
+            
+            $counter = 1
+            do {
+                $counter++
+                $newFileName = "$baseName-$counter$extension"
+                $finalBackupPath = Join-Path $directory $newFileName
+            } while (Test-Path $finalBackupPath)
+        }
+        
         # 複製到備份資料夾
-        Copy-Item -Path $destFilePath -Destination $backupFilePath -Force
+        Copy-Item -Path $destFilePath -Destination $finalBackupPath -Force
         $backedUpFiles++
-        Write-Host "已備份: $destFilePath" -ForegroundColor Yellow
+        Write-Host "已備份: $destFilePath -> $(Split-Path $finalBackupPath -Leaf)" -ForegroundColor Yellow
     }
     
     # 建立目標資料夾結構
@@ -66,3 +78,35 @@ Write-Host "備份檔案數: $backedUpFiles" -ForegroundColor Yellow
 Write-Host "移動檔案數: $movedFiles" -ForegroundColor Green
 Write-Host "=================================================" -ForegroundColor Cyan
 ```
+
+**運作邏輯：**
+
+1. **備份資料夾**：永遠使用今天日期 `yyyyMMdd`（例如：`20250116`）
+2. **檔案備份邏輯**：
+   - 如果 `file.txt` 不存在於備份資料夾 → 直接備份為 `file.txt`
+   - 如果 `file.txt` 已存在 → 備份為 `file.txt-2`
+   - 如果 `file.txt-2` 也存在 → 備份為 `file.txt-3`
+   - 以此類推
+
+**執行範例：**
+
+假設今天執行 3 次，每次都要覆蓋 `B\document.txt`：
+```
+Backup\20250116\
+├── document.txt      (第一次執行的備份)
+├── document.txt-2    (第二次執行的備份)
+└── document.txt-3    (第三次執行的備份)
+```
+
+**輸出範例：**
+```
+備份資料夾: C:\Backup\20250116
+已備份: C:\B\document.txt -> document.txt-2
+已移動: \document.txt
+
+==================== 操作完成 ====================
+備份位置: C:\Backup\20250116
+總檔案數: 1
+備份檔案數: 1
+移動檔案數: 1
+=================================================
