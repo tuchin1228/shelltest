@@ -1,15 +1,30 @@
 # 定義資料夾路徑
 $sourceFolder = "C:\A"
 $destFolder = "C:\B"
-$backupFolder = "C:\Backup"
+$backupBaseFolder = "C:\Backup"
 
-# 建立備份資料夾（如果不存在）
-if (-not (Test-Path $backupFolder)) {
-    New-Item -ItemType Directory -Path $backupFolder -Force
+# 建立備份資料夾名稱（日期 + 流水號）
+$today = Get-Date -Format "yyyyMMdd"
+$counter = 1
+$backupFolder = Join-Path $backupBaseFolder $today
+
+# 如果今天已經有備份，則加上流水號
+while (Test-Path $backupFolder) {
+    $counter++
+    $backupFolder = Join-Path $backupBaseFolder "$today-$counter"
 }
+
+# 建立備份資料夾
+New-Item -ItemType Directory -Path $backupFolder -Force | Out-Null
+Write-Host "備份資料夾: $backupFolder" -ForegroundColor Cyan
 
 # 取得來源資料夾中的所有檔案
 $sourceFiles = Get-ChildItem -Path $sourceFolder -Recurse -File
+
+# 統計資訊
+$totalFiles = $sourceFiles.Count
+$backedUpFiles = 0
+$movedFiles = 0
 
 foreach ($file in $sourceFiles) {
     # 計算目標檔案的相對路徑
@@ -22,23 +37,32 @@ foreach ($file in $sourceFiles) {
         # 建立備份資料夾結構
         $backupFileDir = Split-Path $backupFilePath -Parent
         if (-not (Test-Path $backupFileDir)) {
-            New-Item -ItemType Directory -Path $backupFileDir -Force
+            New-Item -ItemType Directory -Path $backupFileDir -Force | Out-Null
         }
         
         # 複製到備份資料夾
         Copy-Item -Path $destFilePath -Destination $backupFilePath -Force
-        Write-Host "已備份: $destFilePath -> $backupFilePath" -ForegroundColor Yellow
+        $backedUpFiles++
+        Write-Host "已備份: $destFilePath" -ForegroundColor Yellow
     }
     
     # 建立目標資料夾結構
     $destFileDir = Split-Path $destFilePath -Parent
     if (-not (Test-Path $destFileDir)) {
-        New-Item -ItemType Directory -Path $destFileDir -Force
+        New-Item -ItemType Directory -Path $destFileDir -Force | Out-Null
     }
     
     # 移動檔案（剪下）
     Move-Item -Path $file.FullName -Destination $destFilePath -Force
-    Write-Host "已移動: $($file.FullName) -> $destFilePath" -ForegroundColor Green
+    $movedFiles++
+    Write-Host "已移動: $relativePath" -ForegroundColor Green
 }
 
-Write-Host "`n操作完成！" -ForegroundColor Cyan
+# 顯示統計資訊
+Write-Host "`n==================== 操作完成 ====================" -ForegroundColor Cyan
+Write-Host "備份位置: $backupFolder" -ForegroundColor Cyan
+Write-Host "總檔案數: $totalFiles" -ForegroundColor White
+Write-Host "備份檔案數: $backedUpFiles" -ForegroundColor Yellow
+Write-Host "移動檔案數: $movedFiles" -ForegroundColor Green
+Write-Host "=================================================" -ForegroundColor Cyan
+```
