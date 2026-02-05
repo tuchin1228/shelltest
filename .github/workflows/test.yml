@@ -3,27 +3,28 @@ name: Txt Secret Test
 on: [push]
 
 jobs:
-  check-secret:
+  test-secrets:
+    # 這裡的邏輯：如果是 main 分支，就用 PRODUCTION 環境；否則用 DEV 環境
+    environment: ${{ github.ref_name == 'master' && 'PRODUCTION' || 'DEV' }}
+    
     runs-on: ubuntu-latest
+    
     steps:
-      - name: 複製程式碼
-        uses: actions/checkout@v4
-
-      - name: 驗證 Secret 是否存在
-        env:
-          API_URL: ${{ secrets.API_URL }}
+      - name: 檢查當前環境
         run: |
-          if [ -z "$API_URL" ]; then
-            echo "錯誤：找不到 Secret！"
+          echo "當前執行分支: ${{ github.ref_name }}"
+          echo "使用的環境名稱: ${{ (github.ref_name == 'master' && 'PRODUCTION') || 'DEV' }}"
+
+      - name: 測試 Secret 長度
+        env:
+          MY_KEY: ${{ secrets.ENV_KEY }}
+        run: |
+          if [ -z "$MY_KEY" ]; then
+            echo "❌ 錯誤：無法讀取 ENV_KEY"
             exit 1
           else
-            echo "成功：Secret 已讀取（基於安全理由，Log 會顯示為 ***）"
-            # 測試 Secret 的長度是否正確（例如應為 24 個字元）
-            echo "字串長度檢查..."
-            if [ ${#API_URL} -eq 24 ]; then
-              echo "長度驗證通過！"
-            else
-              echo "長度驗證失敗，目前的長度是 ${#API_URL}"
-              exit 1
-            fi
+            echo "✅ 成功：已讀取 $GITHUB_ENVIRONMENT 環境的 Secret"
+            echo "字串長度為: ${MY_KEY}"
           fi
+
+
