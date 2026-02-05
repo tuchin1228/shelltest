@@ -17,7 +17,7 @@ jobs:
 
       - name: 測試 Secret 長度
         env:
-          MY_KEY: ${{ secrets.ENV_KEY }}
+          MY_KEY: ${{ secrets.pwd }}
         run: |
           if [ -z "$MY_KEY" ]; then
             echo "❌ 錯誤：無法讀取 ENV_KEY"
