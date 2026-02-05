@@ -11,19 +11,19 @@ jobs:
 
       - name: 驗證 Secret 是否存在
         env:
-          MY_SECRET: ${{ secrets.MY_TEST_SECRET }}
+          API_URL: ${{ secrets.API_URL }}
         run: |
-          if [ -z "$MY_SECRET" ]; then
+          if [ -z "$API_URL" ]; then
             echo "錯誤：找不到 Secret！"
             exit 1
           else
             echo "成功：Secret 已讀取（基於安全理由，Log 會顯示為 ***）"
             # 測試 Secret 的長度是否正確（例如應為 24 個字元）
             echo "字串長度檢查..."
-            if [ ${#MY_SECRET} -eq 24 ]; then
+            if [ ${#API_URL} -eq 24 ]; then
               echo "長度驗證通過！"
             else
-              echo "長度驗證失敗，目前的長度是 ${#MY_SECRET}"
+              echo "長度驗證失敗，目前的長度是 ${#API_URL}"
               exit 1
             fi
           fi
